@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("bequ_chatbot_POSTGRES_PRISMA_URL")
+  directUrl = env("bequ_chatbot_POSTGRES_URL_NON_POOLING")
+}
+
+model User {
+  id                String    @id @default(cuid())
+  name              String?
+  email             String    @unique
+  emailVerified     DateTime?
+  image             String?
+  password          String?   // Contraseña hasheada si no usas OAuth
+  questionsRemaining Int       @default(3)
+  subscriptionStatus String    @default("free") // "free", "pro", "enterprise"
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relaciones
+  accounts          Account[]
+  sessions          Session[]
+  chatHistory       ChatHistory[]
+  subscription      Subscription?
+  documents         Document[]  // Para usuarios enterprise que pueden subir sus propios documentos
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  name        String
+  filename    String
+  path        String   // Ruta de almacenamiento
+  size        Int      // Tamaño en bytes
+  category    String   @default("Uncategorized")
+  contentType String   @default("application/pdf")
+  uploadedBy  String?  // ID de usuario para usuarios enterprise
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relaciones
+  user        User?    @relation(fields: [uploadedBy], references: [id])
+  chatHistory ChatHistoryDocument[]
+  
+  // Índice para búsqueda de texto completo
+  @@index([name, category])
+}
+
+model ChatHistory {
+  id          String   @id @default(cuid())
+  userId      String
+  question    String
+  response    String   @db.Text
+  createdAt   DateTime @default(now())
+  
+  // Relaciones
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents   ChatHistoryDocument[]
+  
+  // Índice para consultas más rápidas del historial de usuario
+  @@index([userId, createdAt])
+}
+
+model ChatHistoryDocument {
+  chatHistoryId String
+  documentId    String
+  
+  // Relaciones
+  chatHistory   ChatHistory @relation(fields: [chatHistoryId], references: [id], onDelete: Cascade)
+  document      Document    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  @@id([chatHistoryId, documentId])
+}
+
+model Subscription {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  stripePriceId String?
+  stripeCurrentPeriodEnd DateTime?
+  plan          String   // "pro", "enterprise"
+  status        String   // "active", "canceled", "past_due"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relaciones
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ResponseCache {
+  id            String   @id @default(cuid())
+  question      String
+  normalizedQuestion String
+  response      String   @db.Text
+  documentIds   String[] // Array de IDs de documentos usados para contexto
+  createdAt     DateTime @default(now())
+  expiresAt     DateTime
+  
+  // Índice para búsquedas en caché
+  @@index([normalizedQuestion, expiresAt])
+}
